@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from data.database import Base
@@ -12,7 +12,7 @@ class UserModel(Base): # модель пользователя
     username = Column(String(50), nullable=True)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=True)
-    registration_date = Column(DateTime, default=datetime.utcnow)
+    registration_date = Column(Date, default=datetime.utcnow)
 
     tasks = relationship(
         "TaskModel",
@@ -28,7 +28,7 @@ class TaskModel(Base): # модель задачи
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False) # ссылка на пользователя
     title = Column(String(50), nullable=False)
     description = Column(String(150), nullable=True)
-    due_date = Column(DateTime, nullable=True)
+    due_date = Column(Date, nullable=True)
     is_done = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
