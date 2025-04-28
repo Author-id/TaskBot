@@ -9,6 +9,7 @@ from data.database import new_session, setup_database
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
 from data.models import TaskModel
+from sqlalchemy.future import select
 
 form_router = Router()
 dp = Dispatcher()
@@ -28,6 +29,7 @@ async def process_start_command(message: Message):
 class TaskStates(StatesGroup):
     title = State()
     due_date = State()
+    delete_number = State()
 
 
 @dp.message(Command("add_task"))
@@ -78,6 +80,38 @@ async def process_due_date(message: Message, state: FSMContext):
         except Exception as e:
             print(e)
             await message.answer("Ошибка при сохранении задачи!")
+        finally:
+            await state.clear()
+
+
+@dp.message(Command("delete"))
+async def delete_message(message: Message, state: FSMContext):
+    await message.answer("Введите номер задачи для удаления:")
+    await state.set_state(TaskStates.delete_number)
+
+
+@dp.message(TaskStates.delete_number)
+async def delete(message: Message, state: FSMContext):
+    async with new_session() as session:
+        data = message.text
+        try:
+            data = int(data)
+            answer = f"№{data}"
+            result = await session.execute(select(TaskModel).where(
+                TaskModel.user_id == message.from_user.id,
+                TaskModel.id == data,
+            ))
+            task = result.scalars().first()
+            if task:
+                await session.delete(task)  # Удаляем задачу
+                await session.commit()  # Сохраняем изменения
+                await message.reply(f'Задача {answer} удалена!')
+            else:
+                await message.reply(f'Задача с {answer} не найдена.')
+
+        except ValueError:
+            await message.answer("Введите число")
+            return
         finally:
             await state.clear()
 
