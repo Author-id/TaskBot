@@ -7,12 +7,10 @@ from data.database import Base
 class UserModel(Base): # модель пользователя
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True)
     tg_id = Column(Integer, primary_key=True)
     username = Column(String(50), nullable=True)
     first_name = Column(String(50), nullable=False)
-    last_name = Column(String(50), nullable=True)
-    registration_date = Column(Date, default=datetime.utcnow)
 
     tasks = relationship(
         "TaskModel",
@@ -27,7 +25,7 @@ class TaskModel(Base): # модель задачи
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False) # ссылка на пользователя
     title = Column(String(50), nullable=False)
-    description = Column(String(150), nullable=True)
+    tag = Column(String(20), nullable=True)
     due_date = Column(Date, nullable=True)
     is_done = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
