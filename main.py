@@ -103,8 +103,8 @@ async def delete(message: Message, state: FSMContext):
             ))
             task = result.scalars().first()
             if task:
-                await session.delete(task)  # Удаляем задачу
-                await session.commit()  # Сохраняем изменения
+                await session.delete(task)
+                await session.commit()
                 await message.reply(f'Задача {answer} удалена!')
             else:
                 await message.reply(f'Задача с {answer} не найдена.')
