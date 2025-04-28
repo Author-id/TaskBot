@@ -4,7 +4,7 @@ __pycache__/
 *$py.class
 
 # databases
-src/posts.db
+data/taskbot.db
 db/alchemy_test.db
 
 # secret
