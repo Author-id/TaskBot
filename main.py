@@ -115,7 +115,7 @@ async def process_due_date(message: Message, state: FSMContext):
             await state.clear()
 
 
-@dp.message(Command("delete"))
+@dp.message(Command("delete_task"))
 async def delete_message(message: Message, state: FSMContext):
     data = await get_tasks(False, message)
     if data:
@@ -126,7 +126,7 @@ async def delete_message(message: Message, state: FSMContext):
 
 
 @dp.message(TaskStates.delete_number)
-async def delete(message: Message, state: FSMContext):
+async def delete_task(message: Message, state: FSMContext):
     data = message.text
     task, session = await get_task(data, message)
     answer = f"№{data}"
@@ -143,8 +143,8 @@ async def delete(message: Message, state: FSMContext):
 async def task_buttons(message: Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Выполненные", callback_data="done"),
             InlineKeyboardButton(text="Активные", callback_data="active"),
+            InlineKeyboardButton(text="Завершенные", callback_data="done"),
         ],
     ])
 
@@ -157,7 +157,7 @@ async def choose_done(callback: CallbackQuery):
     if data:
         await callback.message.answer(f"Выполненные задачи:\n{'\n'.join(data)}")
     else:
-        await callback.message.answer("Выполненных задач нет")
+        await callback.message.answer("Завершенных задач нет")
 
 
 @dp.callback_query(lambda c: c.data == "active")
@@ -188,7 +188,7 @@ async def delete(message: Message):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="Удалить", callback_data="delete"),
-                InlineKeyboardButton(text="Редактировать", callback_data="change_text"),
+                InlineKeyboardButton(text="Изменить название", callback_data="change_text"),
             ],
             [
                 InlineKeyboardButton(text="Изменить дедлайн", callback_data="change_date"),
