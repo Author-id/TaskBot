@@ -1,10 +1,11 @@
 import asyncio
 from datetime import datetime
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+
 from data.database import new_session, setup_database
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
@@ -86,8 +87,18 @@ async def process_due_date(message: Message, state: FSMContext):
 
 @dp.message(Command("delete"))
 async def delete_message(message: Message, state: FSMContext):
-    await message.answer("Введите номер задачи для удаления:")
-    await state.set_state(TaskStates.delete_number)
+    async with new_session() as session:
+        result = await session.execute(select(TaskModel).where(
+            TaskModel.user_id == message.from_user.id,
+            TaskModel.is_done == False,
+        ))
+        data = list()
+        for el in result.scalars().all():
+            data.append(f"{el.id}. {el.title}")
+        data.reverse()
+        await message.answer(f"Невыполненные задачи:\n{'\n'.join(data)}")
+        await message.answer("Введите номер задачи для удаления:")
+        await state.set_state(TaskStates.delete_number)
 
 
 @dp.message(TaskStates.delete_number)
@@ -114,6 +125,51 @@ async def delete(message: Message, state: FSMContext):
             return
         finally:
             await state.clear()
+
+
+@dp.message(Command("tasks"))
+async def task_buttons(message: Message):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Выполненные", callback_data="done"),
+            InlineKeyboardButton(text="Невыполненные", callback_data="active"),
+        ],
+    ])
+
+    await message.answer("Выберите тип задач", reply_markup=keyboard)
+
+
+@dp.callback_query(lambda c: c.data == "done")
+async def choose_done(callback: CallbackQuery):
+    async with new_session() as session:
+        result = await session.execute(select(TaskModel).where(
+            TaskModel.user_id == callback.from_user.id,
+            TaskModel.is_done == True,
+        ))
+        data = list()
+        for el in result.scalars().all():
+            data.append(f"{el.id}. {el.title}")
+        if data:
+            await callback.message.answer(f"Выполненные задачи:\n{'\n'.join(data)}")
+        else:
+            await callback.message.answer("Выполненных задач нет")
+
+
+@dp.callback_query(lambda c: c.data == "active")
+async def choose_active(callback: CallbackQuery):
+    async with new_session() as session:
+        result = await session.execute(select(TaskModel).where(
+            TaskModel.user_id == callback.from_user.id,
+            TaskModel.is_done == False,
+        ))
+        data = list()
+        for el in result.scalars().all():
+            data.append(f"{el.id}. {el.title}")
+        data.reverse()
+        if data:
+            await callback.message.answer(f"Невыполненные задачи:\n{'\n'.join(data)}")
+        else:
+            await callback.message.answer("Все задачи выполнены")
 
 
 if __name__ == "__main__":
