@@ -1,19 +1,48 @@
 import asyncio
 from datetime import datetime
+
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
+from sqlalchemy.future import select
 
-from data.database import new_session, setup_database
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
+from data.database import new_session
 from data.models import TaskModel
-from sqlalchemy.future import select
 
 form_router = Router()
 dp = Dispatcher()
+
+
+async def get_tasks(status, message):
+    async with new_session() as session:
+        result = await session.execute(select(TaskModel).where(
+            TaskModel.user_id == message.from_user.id,
+            TaskModel.is_done == status,
+        ))
+        data = list()
+        for el in result.scalars().all():
+            data.append(f"{el.id}. {el.title}")
+        return data
+
+
+async def get_task(data, message):
+    async with new_session() as session:
+        try:
+            data = int(data)
+            result = await session.execute(select(TaskModel).where(
+                TaskModel.user_id == message.from_user.id,
+                TaskModel.id == data,
+            ))
+            task = result.scalars().first()
+            return task, session
+
+        except ValueError:
+            await message.answer("Введите корректный номер задачи (целое, положительное число)")
+            return
 
 
 async def main():
@@ -31,6 +60,7 @@ class TaskStates(StatesGroup):
     title = State()
     due_date = State()
     delete_number = State()
+    edit_task = State()
 
 
 @dp.message(Command("add_task"))
@@ -87,44 +117,26 @@ async def process_due_date(message: Message, state: FSMContext):
 
 @dp.message(Command("delete"))
 async def delete_message(message: Message, state: FSMContext):
-    async with new_session() as session:
-        result = await session.execute(select(TaskModel).where(
-            TaskModel.user_id == message.from_user.id,
-            TaskModel.is_done == False,
-        ))
-        data = list()
-        for el in result.scalars().all():
-            data.append(f"{el.id}. {el.title}")
-        data.reverse()
-        await message.answer(f"Невыполненные задачи:\n{'\n'.join(data)}")
-        await message.answer("Введите номер задачи для удаления:")
+    data = await get_tasks(False, message)
+    if data:
+        await message.answer(f"Выберите номер задачи для удаления:\n{'\n'.join(data)}")
         await state.set_state(TaskStates.delete_number)
+    else:
+        await message.answer(f"Активных задач нет")
 
 
 @dp.message(TaskStates.delete_number)
 async def delete(message: Message, state: FSMContext):
-    async with new_session() as session:
-        data = message.text
-        try:
-            data = int(data)
-            answer = f"№{data}"
-            result = await session.execute(select(TaskModel).where(
-                TaskModel.user_id == message.from_user.id,
-                TaskModel.id == data,
-            ))
-            task = result.scalars().first()
-            if task:
-                await session.delete(task)
-                await session.commit()
-                await message.reply(f'Задача {answer} удалена!')
-            else:
-                await message.reply(f'Задача с {answer} не найдена.')
-
-        except ValueError:
-            await message.answer("Введите число")
-            return
-        finally:
-            await state.clear()
+    data = message.text
+    task, session = await get_task(data, message)
+    answer = f"№{data}"
+    if task:
+        await session.delete(task)
+        await session.commit()
+        await message.reply(f'Задача {answer} удалена!')
+        await state.clear()
+    else:
+        await message.reply(f'Задача с {answer} не найдена.')
 
 
 @dp.message(Command("tasks"))
@@ -132,7 +144,7 @@ async def task_buttons(message: Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Выполненные", callback_data="done"),
-            InlineKeyboardButton(text="Невыполненные", callback_data="active"),
+            InlineKeyboardButton(text="Активные", callback_data="active"),
         ],
     ])
 
@@ -141,35 +153,55 @@ async def task_buttons(message: Message):
 
 @dp.callback_query(lambda c: c.data == "done")
 async def choose_done(callback: CallbackQuery):
-    async with new_session() as session:
-        result = await session.execute(select(TaskModel).where(
-            TaskModel.user_id == callback.from_user.id,
-            TaskModel.is_done == True,
-        ))
-        data = list()
-        for el in result.scalars().all():
-            data.append(f"{el.id}. {el.title}")
-        if data:
-            await callback.message.answer(f"Выполненные задачи:\n{'\n'.join(data)}")
-        else:
-            await callback.message.answer("Выполненных задач нет")
+    data = await get_tasks(True, callback)
+    if data:
+        await callback.message.answer(f"Выполненные задачи:\n{'\n'.join(data)}")
+    else:
+        await callback.message.answer("Выполненных задач нет")
 
 
 @dp.callback_query(lambda c: c.data == "active")
 async def choose_active(callback: CallbackQuery):
-    async with new_session() as session:
-        result = await session.execute(select(TaskModel).where(
-            TaskModel.user_id == callback.from_user.id,
-            TaskModel.is_done == False,
-        ))
-        data = list()
-        for el in result.scalars().all():
-            data.append(f"{el.id}. {el.title}")
-        data.reverse()
-        if data:
-            await callback.message.answer(f"Невыполненные задачи:\n{'\n'.join(data)}")
-        else:
-            await callback.message.answer("Все задачи выполнены")
+    data = await get_tasks(False, callback)
+    if data:
+        await callback.message.answer(f"Активные задачи:\n{'\n'.join(data)}")
+    else:
+        await callback.message.answer("Активных задач нет")
+
+
+@dp.message(Command("edit_task"))
+async def start_edit(message: Message, state: FSMContext):
+    data = await get_tasks(False, message)
+    if data:
+        await message.answer(f"Выберите номер задачи, которую хотите отредактировать:\n{'\n'.join(data)}")
+        await state.set_state(TaskStates.edit_task)
+    else:
+        await message.answer(f"Активных задач нет")
+
+
+@dp.message(TaskStates.edit_task)
+async def delete(message: Message):
+    data = message.text
+    task, session = await get_task(data, message)
+    answer = f"№{data}"
+    if task:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Удалить", callback_data="delete"),
+                InlineKeyboardButton(text="Редактировать", callback_data="change_text"),
+            ],
+            [
+                InlineKeyboardButton(text="Изменить дедлайн", callback_data="change_date"),
+                InlineKeyboardButton(text="Поменять тег", callback_data="change_tag"),
+            ],
+            [
+                InlineKeyboardButton(text="Завершить", callback_data="is_done"),
+            ],
+        ])
+
+        await message.answer("Выберите действие", reply_markup=keyboard)
+    else:
+        await message.answer(f"Задача с {answer} не найдена.")
 
 
 if __name__ == "__main__":
