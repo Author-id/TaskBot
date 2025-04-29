@@ -8,9 +8,8 @@ class UserModel(Base): # модель пользователя
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    tg_id = Column(Integer, primary_key=True)
+    tg_id = Column(Integer, primary_key=True, nullable=False)
     username = Column(String(50), nullable=True)
-    first_name = Column(String(50), nullable=False)
 
     tasks = relationship(
         "TaskModel",
@@ -25,12 +24,28 @@ class TaskModel(Base): # модель задачи
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False) # ссылка на пользователя
     title = Column(String(50), nullable=False)
-    tag = Column(String(20), nullable=True)
+    tag_id = Column(Integer, ForeignKey("tags.id"), nullable=True)
     due_date = Column(Date, nullable=True)
     is_done = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
+    tag = relationship(
+        "TagModel",
+        back_populates="tasks"
+    ) # связь многие к одному
     user = relationship(
         "UserModel",
-        back_populates="tasks") # связь многие к одному
+        back_populates="tasks"
+    ) # связь многие к одному
+
+
+class TagModel(Base): # модель тега
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(20), nullable=False, unique=True)
+
+    tasks = relationship(
+        "TaskModel",
+        back_populates="tag"
+    ) # связь один ко многим
