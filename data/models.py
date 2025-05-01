@@ -43,6 +43,7 @@ class TagModel(Base): # модель тега
     __tablename__ = "tags"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String(20), nullable=False, unique=True)
 
     tasks = relationship(

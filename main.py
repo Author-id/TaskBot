@@ -10,7 +10,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, C
 
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
-from data.database import new_session
+from data.database import new_session, setup_database
 from data.models import TaskModel, TagModel
 
 form_router = Router()
@@ -44,6 +44,8 @@ class TaskStates(StatesGroup):
     delete_number = State()
     edit_task = State()
     add_tag = State()
+    delete_tag = State()
+
 
 
 @dp.message(Command("add_task"))
@@ -124,6 +126,7 @@ async def process_task_add_tag(message: Message, state: FSMContext):
     async with new_session() as session:
         try:
             new_tag = TagModel(
+                user_id=message.from_user.id,
                 title=title,
             )
             session.add(new_tag)
@@ -134,6 +137,48 @@ async def process_task_add_tag(message: Message, state: FSMContext):
             await message.answer("Ошибка при сохранении тега!")
         finally:
             await state.clear()
+
+
+@dp.message(Command("delete_tag"))
+async def delete_tag(message: Message, state: FSMContext):
+    async with new_session() as session:
+        query = sqlalchemy.select(TagModel).where(
+            TagModel.user_id == message.from_user.id
+            )
+        result = await session.execute(query)
+        if not result:
+            await message.answer("У вас нет активных тегов!")
+            return
+
+        user_tags = [(tag.id, tag.title) for tag in result.scalars().all()]
+        tags_list = "\n".join([f"{tag_id}. {tag_title}" for tag_id, tag_title in user_tags])
+        await message.answer(
+            "Введите ID тега:\n"
+            f"{tags_list}\n\n",
+        )
+        await state.update_data(user_tags=user_tags)
+        await state.set_state(TaskStates.delete_tag)
+
+
+@dp.message(TaskStates.delete_tag)
+async def process_task_delete_tag(message: Message, state: FSMContext):
+    try:
+        tag_id = int(message.text)
+        data = await state.get_data()
+        user_tags = data["user_tags"]
+        if tag_id not in [tag[0] for tag in user_tags]:
+            await message.answer("Тег с таким ID не найден среди ваших тегов.")
+            return
+
+        async with new_session() as session:
+            tag = await session.get(TagModel, tag_id)
+            await session.delete(tag)
+            await session.commit()
+            await message.answer(f"Тег '{tag.title}' успешно удалён!")
+    except ValueError:
+        await message.answer("Введите число (ID тега)!!!")
+    finally:
+        await state.clear()
 
 
 async def get_tasks(status, message):
@@ -164,14 +209,14 @@ async def get_task(data, message):
             return
 
 
-@dp.message(Command("delete_task"))
-async def delete_message(message: Message, state: FSMContext):
-    data = await get_tasks(False, message)
-    if data:
-        await message.answer(f"Выберите номер задачи для удаления:\n{'\n'.join(data)}")
-        await state.set_state(TaskStates.delete_number)
-    else:
-        await message.answer(f"Активных задач нет")
+# @dp.message(Command("delete_task"))
+# async def delete_message(message: Message, state: FSMContext):
+#     data = await get_tasks(False, message)
+#     if data:
+#         await message.answer(f"Выберите номер задачи для удаления:\n{'\n'.join(data)}")
+#         await state.set_state(TaskStates.delete_number)
+#     else:
+#         await message.answer(f"Активных задач нет")
 
 
 @dp.message(TaskStates.delete_number)
@@ -182,7 +227,7 @@ async def delete_task(message: Message, state: FSMContext):
     if task:
         await session.delete(task)
         await session.commit()
-        await message.reply(f'Задача {answer} удалена!')
+        await message.reply(f'Задача {answer} успешно удалена!')
         await state.clear()
     else:
         await message.reply(f'Задача с {answer} не найдена.')
@@ -200,32 +245,32 @@ async def task_buttons(message: Message):
     await message.answer("Выберите тип задач", reply_markup=keyboard)
 
 
-@dp.callback_query(lambda c: c.data == "done")
-async def choose_done(callback: CallbackQuery):
-    data = await get_tasks(True, callback)
-    if data:
-        await callback.message.answer(f"Выполненные задачи:\n{'\n'.join(data)}")
-    else:
-        await callback.message.answer("Завершенных задач нет")
+# @dp.callback_query(lambda c: c.data == "done")
+# async def choose_done(callback: CallbackQuery):
+#     data = await get_tasks(True, callback)
+#     if data:
+#         await callback.message.answer(f"Выполненные задачи:\n{'\n'.join(data)}")
+#     else:
+#         await callback.message.answer("Завершенных задач нет")
 
 
-@dp.callback_query(lambda c: c.data == "active")
-async def choose_active(callback: CallbackQuery):
-    data = await get_tasks(False, callback)
-    if data:
-        await callback.message.answer(f"Активные задачи:\n{'\n'.join(data)}")
-    else:
-        await callback.message.answer("Активных задач нет")
+# @dp.callback_query(lambda c: c.data == "active")
+# async def choose_active(callback: CallbackQuery):
+#     data = await get_tasks(False, callback)
+#     if data:
+#         await callback.message.answer(f"Активные задачи:\n{'\n'.join(data)}")
+#     else:
+#         await callback.message.answer("Активных задач нет")
 
 
-@dp.message(Command("edit_task"))
-async def start_edit(message: Message, state: FSMContext):
-    data = await get_tasks(False, message)
-    if data:
-        await message.answer(f"Выберите номер задачи, которую хотите отредактировать:\n{'\n'.join(data)}")
-        await state.set_state(TaskStates.edit_task)
-    else:
-        await message.answer(f"Активных задач нет")
+# @dp.message(Command("edit_task"))
+# async def start_edit(message: Message, state: FSMContext):
+#     data = await get_tasks(False, message)
+#     if data:
+#         await message.answer(f"Выберите номер задачи, которую хотите отредактировать:\n{'\n'.join(data)}")
+#         await state.set_state(TaskStates.edit_task)
+#     else:
+#         await message.answer(f"Активных задач нет")
 
 
 @dp.message(TaskStates.edit_task)
