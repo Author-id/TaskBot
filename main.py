@@ -1,9 +1,10 @@
 import asyncio
 import sqlalchemy
 from datetime import datetime
+import re
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
@@ -47,6 +48,8 @@ class TaskStates(StatesGroup):
     change_title = State()
     change_deadline = State()
     change_tag = State()
+    type_to_edit = State()
+    type_to = State()
 
 
 @dp.message(Command("add_task"))
@@ -103,7 +106,7 @@ async def process_due_date(message: Message, state: FSMContext):
                 session.add(task)
                 await session.commit()
                 await message.answer(
-                    f"Задача добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime("%d-%m-%Y")}\nТег: {data['tag']}")
+                    f"Задача добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime("%d-%m-%Y")}\nТег: #{data['tag']}")
             else:
                 task = TaskModel(
                     user_id=message.from_user.id,
@@ -214,8 +217,9 @@ async def choose_status(callback, state, arg, text1, text2):
     data = await get_tasks(arg, callback)
     if data:
         await callback.message.answer(text1 + f"{"".join(data)}")
+        await state.clear()
         if text1 == "Выберите номер задачи:\n":
-            nums = list(map(int, [el[9] for el in data]))
+            nums = list(map(int, [re.search(r"(№\d+)[^\n]*", el).group(1).strip().strip("№") for el in data]))
             await state.set_state(TaskStates.edit_task)
             await state.update_data(nums=nums)
     else:
@@ -223,33 +227,47 @@ async def choose_status(callback, state, arg, text1, text2):
 
 
 @dp.message(Command("tasks"))
-async def tasks_buttons(message: Message):
-    await task_buttons(message, "active", "done", "Выберите тип задач")
+async def tasks_buttons(message: Message, state: FSMContext):
+    await task_buttons(message, "active", "done", "Выберите тип задач: ")
+    await state.set_state(TaskStates.type_to)
 
 
-@dp.callback_query(lambda c: c.data == "active")
+@dp.callback_query(
+    F.data == "active",
+    StateFilter(TaskStates.type_to)
+)
 async def choose_active(callback: CallbackQuery, state: FSMContext):
     await choose_status(callback, state, False, "Активные задачи:\n", "Активных задач нет")
 
 
-@dp.callback_query(lambda c: c.data == "done")
-async def choose_active(callback: CallbackQuery, state: FSMContext):
+@dp.callback_query(
+    F.data == "done",
+    StateFilter(TaskStates.type_to)
+)
+async def choose_done(callback: CallbackQuery, state: FSMContext):
     await choose_status(callback, state, True, "Завершенные задачи:\n", "Завершенных задач нет")
 
 
 @dp.message(Command("edit_task"))
-async def edit_tasks_buttons(message: Message):
-    await task_buttons(message, "edit_active", "edit_done", "Выберите тип задачи")
+async def edit_tasks_buttons(message: Message, state: FSMContext):
+    await task_buttons(message, "edit_active", "edit_done", "Выберите тип задачи:")
+    await state.set_state(TaskStates.type_to_edit)
 
 
-@dp.callback_query(lambda c: c.data == "edit_active")
+@dp.callback_query(
+    F.data == "edit_active",
+    StateFilter(TaskStates.type_to_edit)
+)
 async def edit_choose_active(callback: CallbackQuery, state: FSMContext):
     await choose_status(callback, state, False, "Выберите номер задачи:\n",
                         "Активных задач нет")
 
 
-@dp.callback_query(lambda c: c.data == "edit_done")
-async def edit_choose_active(callback: CallbackQuery, state: FSMContext):
+@dp.callback_query(
+    F.data == "edit_done",
+    StateFilter(TaskStates.type_to_edit)
+)
+async def edit_choose_done(callback: CallbackQuery, state: FSMContext):
     await choose_status(callback, state, True, "Выберите номер задачи:\n", "Завершенных задач нет")
 
 
@@ -311,18 +329,26 @@ async def change_smth(callback, state, text, to_update):
     await state.update_data(task=task, session=session, answer=answer)
 
 
-@dp.callback_query(lambda c: c.data == "delete")
+@dp.callback_query(
+    F.data == "delete",
+    StateFilter(TaskStates.edit_task),
+)
 async def delete(callback: CallbackQuery, state: FSMContext):
     task, session, answer = await get_state(state)
     await session.delete(task)
     await session.commit()
     await callback.message.answer(f'Задача {answer} удалена!')
     await state.clear()
+    return
 
 
-@dp.callback_query(lambda c: c.data == "change_text")
+@dp.callback_query(
+    F.data == "change_text",
+    StateFilter(TaskStates.edit_task),
+)
 async def change_text(callback: CallbackQuery, state: FSMContext, ):
     await change_smth(callback, state, "Введите новое название", TaskStates.change_title)
+    return
 
 
 @dp.message(TaskStates.change_title)
@@ -334,12 +360,17 @@ async def title_is_changed(message: Message, state: FSMContext):
     session.add(task)
     await session.commit()
     await message.answer(f'Название задачи {answer} изменено с "{old_title}" на "{task.title}"')
-    await state.set_state(TaskStates.edit_task)
+    await state.clear()
+    return
 
 
-@dp.callback_query(lambda c: c.data == "change_deadline")
+@dp.callback_query(
+    F.data == "change_deadline",
+    StateFilter(TaskStates.edit_task),
+)
 async def change_deadline(callback: CallbackQuery, state: FSMContext):
     await change_smth(callback, state, "Введите новую дату выполнения (ДД-ММ-ГГГГ):", TaskStates.change_deadline)
+    return
 
 
 @dp.message(TaskStates.change_deadline)
@@ -354,12 +385,17 @@ async def date_update(message: Message, state: FSMContext):
     await session.commit()
     await message.answer(
         f"Дедлайн задачи {answer} перенесён с {old_deadline.strftime("%d-%m-%Y")} на {task.due_date.strftime("%d-%m-%Y")}")
-    await state.set_state(TaskStates.edit_task)
+    await state.clear()
+    return
 
 
-@dp.callback_query(lambda c: c.data == "change_tag")
+@dp.callback_query(
+    F.data == "change_tag",
+    StateFilter(TaskStates.edit_task),
+)
 async def change_tag(callback: CallbackQuery, state: FSMContext):
     await change_smth(callback, state, "Введите новый тег (без #):", TaskStates.change_tag)
+    return
 
 
 @dp.message(TaskStates.change_tag)
@@ -391,7 +427,8 @@ async def tag_update(message: Message, state: FSMContext):
         await message.answer(f'Тег задачи {answer} изменён с #{old_tag} на #{title}')
     else:
         await message.answer(f'К задаче {answer} добавлен тег #{title}')
-    await state.set_state(TaskStates.edit_task)
+    await state.clear()
+    return
 
 
 async def change_status(callback, state, arg, text):
@@ -401,16 +438,25 @@ async def change_status(callback, state, arg, text):
     await session.commit()
     await callback.message.answer(f"Задача {answer} " + text)
     await state.clear()
+    return
 
 
-@dp.callback_query(lambda c: c.data == "is_done")
+@dp.callback_query(
+    F.data == "is_done",
+    StateFilter(TaskStates.edit_task),
+)
 async def date_update(callback: CallbackQuery, state: FSMContext):
     await change_status(callback, state, True, "завершена")
+    return
 
 
-@dp.callback_query(lambda c: c.data == "to_active")
+@dp.callback_query(
+    F.data == "to_active",
+    StateFilter(TaskStates.edit_task),
+)
 async def to_active(callback: CallbackQuery, state: FSMContext):
     await change_status(callback, state, False, "снова активна")
+    return
 
 
 if __name__ == "__main__":
