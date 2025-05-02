@@ -22,7 +22,7 @@ class TaskModel(Base): # модель задачи
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False) # ссылка на пользователя
+    user_id = Column(Integer, ForeignKey("users.tg_id"), nullable=False) # ссылка на пользователя
     title = Column(String(50), nullable=False)
     tag_id = Column(Integer, ForeignKey("tags.id"), nullable=True)
     due_date = Column(Date, nullable=True)
@@ -43,6 +43,7 @@ class TagModel(Base): # модель тега
     __tablename__ = "tags"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.tg_id"), nullable=False)
     title = Column(String(20), nullable=False, unique=True)
 
     tasks = relationship(

@@ -1,7 +1,7 @@
+import re
 import asyncio
 import sqlalchemy
 from datetime import datetime
-import re
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, StateFilter
@@ -42,9 +42,10 @@ async def cancel_handler(message: Message, state: FSMContext) -> None:
 class TaskStates(StatesGroup):
     title_tag = State()
     due_date = State()
+    add_tag = State()
+    delete_tag = State()
     delete_number = State()
     edit_task = State()
-    add_tag = State()
     change_title = State()
     change_deadline = State()
     change_tag = State()
@@ -69,7 +70,7 @@ async def process_task_title_tag(message: Message, state: FSMContext):
         await state.update_data(title=text.strip())
         await state.update_data(tag=None)
     await state.set_state(TaskStates.due_date)
-    await message.answer("Теперь укажите дату выполнения (ДД-ММ-ГГГГ):")
+    await message.answer("Укажите дату выполнения (ДД-ММ-ГГГГ):")
 
 
 async def date_validation(date, message):
@@ -106,7 +107,7 @@ async def process_due_date(message: Message, state: FSMContext):
                 session.add(task)
                 await session.commit()
                 await message.answer(
-                    f"Задача добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime("%d-%m-%Y")}\nТег: #{data['tag']}")
+                    f"Задача успешно добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime('%d-%m-%Y')}\nТег: #{data['tag']}")
             else:
                 task = TaskModel(
                     user_id=message.from_user.id,
@@ -116,13 +117,22 @@ async def process_due_date(message: Message, state: FSMContext):
                 session.add(task)
                 await session.commit()
                 await message.answer(
-                    f"Задача добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime("%d-%m-%Y")}\n")
+                    f"Задача успешно добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime('%d-%m-%Y')}\n")
 
         except Exception as e:
             print(e)
             await message.answer("Ошибка при сохранении задачи!")
         finally:
             await state.clear()
+
+
+async def get_tags(message):
+    async with new_session() as session:
+        query = sqlalchemy.select(TagModel).where(
+            TagModel.user_id == message.from_user.id
+            )
+        result = await session.execute(query)
+        return [(tag.id, tag.title) for tag in result.scalars().all()]
 
 
 @dp.message(Command("add_tag"))
@@ -137,16 +147,58 @@ async def process_task_add_tag(message: Message, state: FSMContext):
     async with new_session() as session:
         try:
             new_tag = TagModel(
+                user_id=message.from_user.id,
                 title=title,
             )
             session.add(new_tag)
             await session.commit()
-            await message.answer(f"Тег '{title}' добавлен!")
-        except Exception as e:
-            print(e)
-            await message.answer("Ошибка при сохранении тега!")
+            await message.answer(f"Тег #{title} успешно добавлен!")
+        except Exception as error:
+            print(error)
+            user_tags = await get_tags(message)
+            if title in [tag[1] for tag in user_tags]:
+                await message.answer("Тег уже существует!")
+            else:
+                await message.answer("Ошибка при сохранении тега!")
         finally:
             await state.clear()
+
+
+@dp.message(Command("delete_tag"))
+async def delete_tag(message: Message, state: FSMContext):
+        user_tags = await get_tags(message)
+        if not user_tags:
+            await message.answer("У вас нет активных тегов!")
+            return
+
+        tags_list = "\n".join([f"{tag_id}. {tag_title}" for tag_id, tag_title in user_tags])
+        await message.answer(
+            "Введите ID тега:\n"
+            f"{tags_list}\n\n",
+        )
+        await state.update_data(user_tags=user_tags)
+        await state.set_state(TaskStates.delete_tag)
+
+
+@dp.message(TaskStates.delete_tag)
+async def process_task_delete_tag(message: Message, state: FSMContext):
+    try:
+        tag_id = int(message.text)
+        data = await state.get_data()
+        user_tags = data["user_tags"]
+        if tag_id not in [tag[0] for tag in user_tags]:
+            await message.answer("Тег с таким ID не найден среди ваших тегов.")
+            return
+
+        async with new_session() as session:
+            tag = await session.get(TagModel, tag_id)
+            await session.delete(tag)
+            await session.commit()
+            await message.answer(f"Тег #{tag.title} успешно удалён!")
+    except ValueError:
+        await message.answer("Введите число (ID тега)!!!")
+    finally:
+        await state.clear()
 
 
 async def get_tasks(status, message):
@@ -165,19 +217,19 @@ async def get_tasks(status, message):
                 if tag:
                     data[
                         el.due_date].append(
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime("%d-%m-%Y")}\nТег: #{tag.title}\n")
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n")
                 else:
                     data[el.due_date].append(
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime("%d-%m-%Y")}\n")
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\n")
             else:
                 if tag:
                     data[
                         el.due_date] = [
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime("%d-%m-%Y")}\nТег: #{tag.title}\n"]
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n"]
                 else:
                     data[
                         el.due_date] = [
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime("%d-%m-%Y")}\n"]
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\n"]
         data = sorted(data.items())
         ans = list()
         for el in data:
@@ -199,7 +251,7 @@ async def get_task(data, message, nums):
             return task, session
 
         except ValueError:
-            await message.answer("Введите корректный номер задачи (целое, положительное число)")
+            await message.answer("Введите номер задачи! (число)")
             return
 
 
@@ -223,7 +275,7 @@ async def choose_status(callback, state, arg, text1, text2):
             i = i.replace(re.search(r"(№\d+)[^\n]*", i).group(1).strip().strip("№"), f"{count} ", 1)
             ans.append(i)
             count += 1
-        await callback.message.answer(text1 + f"{"".join(ans)}")
+        await callback.message.answer(text1 + f"{''.join(ans)}")
         await state.clear()
         if text1 == "Выберите номер задачи:\n":
             count = 1
@@ -352,7 +404,7 @@ async def delete(callback: CallbackQuery, state: FSMContext):
     task, session, answer = await get_state(state)
     await session.delete(task)
     await session.commit()
-    await callback.message.answer(f'Задача {answer} удалена!')
+    await callback.message.answer(f'Задача {answer} успешно удалена!')
     await state.clear()
     return
 
@@ -399,7 +451,7 @@ async def date_update(message: Message, state: FSMContext):
     session.add(task)
     await session.commit()
     await message.answer(
-        f"Дедлайн задачи {answer} перенесён с {old_deadline.strftime("%d-%m-%Y")} на {task.due_date.strftime("%d-%m-%Y")}")
+        f"Дедлайн задачи {answer} перенесён с {old_deadline.strftime('%d-%m-%Y')} на {task.due_date.strftime('%d-%m-%Y')}")
     await state.clear()
     return
 
