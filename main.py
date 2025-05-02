@@ -186,10 +186,11 @@ async def get_tasks(status, message):
         return ans
 
 
-async def get_task(data, message):
+async def get_task(data, message, nums):
     async with new_session() as session:
         try:
             data = int(data)
+            data = nums[data]
             result = await session.execute(sqlalchemy.select(TaskModel).where(
                 TaskModel.user_id == message.from_user.id,
                 TaskModel.id == data,
@@ -216,12 +217,24 @@ async def task_buttons(message, text1, text2, text3):
 async def choose_status(callback, state, arg, text1, text2):
     data = await get_tasks(arg, callback)
     if data:
-        await callback.message.answer(text1 + f"{"".join(data)}")
+        count = 1
+        ans = list()
+        for i in data:
+            i = i.replace(re.search(r"(№\d+)[^\n]*", i).group(1).strip().strip("№"), f"{count} ", 1)
+            ans.append(i)
+            count += 1
+        await callback.message.answer(text1 + f"{"".join(ans)}")
         await state.clear()
         if text1 == "Выберите номер задачи:\n":
+            count = 1
+            answer = dict()
             nums = list(map(int, [re.search(r"(№\d+)[^\n]*", el).group(1).strip().strip("№") for el in data]))
+            for el in nums:
+                answer[count] = el
+                count += 1
+            print(answer)
             await state.set_state(TaskStates.edit_task)
-            await state.update_data(nums=nums)
+            await state.update_data(nums=answer)
     else:
         await callback.message.answer(text2)
 
@@ -276,42 +289,44 @@ async def choose_edit(message: Message, state: FSMContext):
     data = message.text
     nums = await state.get_data()
     nums = nums.get("nums")
-    task, session = await get_task(data, message)
     answer = f"№{data}"
-    if task:
-        if not (task.id in nums):
-            if task.is_done:
-                text = "активной"
-            else:
-                text = "завершенной"
-            await message.answer(f"Задача с {answer} не является {text}.")
-        elif task.is_done:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="Сделать активной", callback_data="to_active"),
-                    InlineKeyboardButton(text="Удалить", callback_data="delete"),
-                ],
-            ])
-            await state.update_data(task=task, session=session, answer=answer)
-            await message.answer("Выберите действие", reply_markup=keyboard)
-        else:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="Название", callback_data="change_text"),
-                    InlineKeyboardButton(text="Дедлайн", callback_data="change_deadline"),
-                ],
-                [
-                    InlineKeyboardButton(text="Тег", callback_data="change_tag"),
-                    InlineKeyboardButton(text="Завершить", callback_data="is_done"),
-                ],
-                [
-                    InlineKeyboardButton(text="Удалить", callback_data="delete"),
-                ],
-            ])
-            await state.update_data(task=task, session=session, answer=answer)
-            await message.answer("Выберите действие", reply_markup=keyboard)
-    else:
+    if not (int(data) in nums):
         await message.answer(f"Задача с {answer} не найдена.")
+    else:
+        task, session = await get_task(data, message, nums)
+        nums = [nums[i] for i in nums]
+        if task:
+            if not (task.id in nums):
+                if task.is_done:
+                    text = "активной"
+                else:
+                    text = "завершенной"
+                await message.answer(f"Задача с {answer} не является {text}.")
+            elif task.is_done:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Сделать активной", callback_data="to_active"),
+                        InlineKeyboardButton(text="Удалить", callback_data="delete"),
+                    ],
+                ])
+                await state.update_data(task=task, session=session, answer=answer)
+                await message.answer("Выберите действие", reply_markup=keyboard)
+            else:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Название", callback_data="change_text"),
+                        InlineKeyboardButton(text="Дедлайн", callback_data="change_deadline"),
+                    ],
+                    [
+                        InlineKeyboardButton(text="Тег", callback_data="change_tag"),
+                        InlineKeyboardButton(text="Завершить", callback_data="is_done"),
+                    ],
+                    [
+                        InlineKeyboardButton(text="Удалить", callback_data="delete"),
+                    ],
+                ])
+                await state.update_data(task=task, session=session, answer=answer)
+                await message.answer("Выберите действие", reply_markup=keyboard)
 
 
 async def get_state(state):
