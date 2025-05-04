@@ -289,10 +289,10 @@ async def choose_status(callback, state, arg, text1, text2):
         count = 1
         ans = list()
         for i in data:
-            i = i.replace(re.search(r"(№\d+)[^\n]*", i).group(1).strip().strip("№"), f"{count} ", 1)
+            i = i.replace(re.search(r"(№\d+)[^\n]*", i).group(1).strip(), f"<b>№{count}</b> ", 1)
             ans.append(i)
             count += 1
-        await callback.message.answer(text1 + f"{''.join(ans)}")
+        await callback.message.answer(text1 + f"{''.join(ans)}", parse_mode="html")
         await state.clear()
         if text1 == "Выберите номер задачи:\n":
             count = 1
