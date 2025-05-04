@@ -7,8 +7,8 @@ from data.database import Base
 class UserModel(Base): # модель пользователя
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True)
-    tg_id = Column(Integer, primary_key=True, nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tg_id = Column(Integer, nullable=False, unique=True)
     username = Column(String(50), nullable=True)
 
     tasks = relationship(

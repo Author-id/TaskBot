@@ -1,7 +1,7 @@
 import re
 import asyncio
 import sqlalchemy
-from datetime import datetime
+from datetime import datetime, date
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, StateFilter
@@ -12,7 +12,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, C
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
 from data.database import new_session, setup_database
-from data.models import TaskModel, TagModel
+from data.models import TaskModel, TagModel, UserModel
 
 form_router = Router()
 dp = Dispatcher()
@@ -26,7 +26,20 @@ async def main():
 
 @dp.message(Command("start"))
 async def process_start_command(message: Message):
-    await message.reply(MESSAGES["greeting text"])
+    async with new_session() as session:
+        query = sqlalchemy.select(UserModel).where(
+            UserModel.tg_id == message.from_user.id
+        )
+        result = await session.execute(query)
+        user_id_list = [user.tg_id for user in result.scalars().all()]
+        if not user_id_list:
+            user = UserModel(
+                tg_id=message.from_user.id,
+                username=message.from_user.username
+            )
+            session.add(user)
+            await session.commit()
+        await message.reply(MESSAGES["start text"])
 
 
 @dp.message(Command("stop"))
@@ -73,9 +86,13 @@ async def process_task_title_tag(message: Message, state: FSMContext):
     await message.answer("Укажите дату выполнения (ДД-ММ-ГГГГ):")
 
 
-async def date_validation(date, message):
+async def date_validation(input_date, message):
     try:
-        due_date = datetime.strptime(date, "%d-%m-%Y").date()
+        due_date = datetime.strptime(input_date, "%d-%m-%Y").date()
+        today = date.today()
+        if due_date < today:
+            await message.answer("Дата в прошлом!!")
+            return
         return due_date
     except ValueError:
         await message.answer("Неверный формат даты! Используйте ДД-ММ-ГГГГ")
