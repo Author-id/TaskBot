@@ -1,7 +1,8 @@
 import re
 import asyncio
 import sqlalchemy
-from datetime import datetime, date
+from sqlalchemy.orm import selectinload
+from datetime import datetime, date, timedelta
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, StateFilter
@@ -9,19 +10,63 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
 from data.database import new_session, setup_database
 from data.models import TaskModel, TagModel, UserModel
 
 form_router = Router()
+scheduler = AsyncIOScheduler()
 dp = Dispatcher()
+
+
+async def send_reminders(bot: Bot):
+    async with new_session() as session:
+        # Получаем задачи, у которых дедлайн через 1 день
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        query = (
+            sqlalchemy.select(TaskModel).where(
+                TaskModel.due_date == tomorrow,
+                TaskModel.is_done == False
+            )
+        )
+        result = await session.execute(query)
+        tasks = result.scalars().all()
+        print(tasks)
+
+        for task in tasks:
+            try:
+                await bot.send_message(
+                    chat_id=task.user_id,
+                    text=f"Завтра ({task.due_date.strftime('%d-%m-%Y')}) ДЕДЛАЙН задачи '{task.title}'!\n"
+                         f"Тег: #{task.tag}\n"
+                         f"Перейдите в /edit_task если хотите перенести дедлайн!"
+                )
+            except Exception as error:
+                print(error)
+
+
+def setup_scheduler(bot: Bot):
+    scheduler.add_job(
+        send_reminders,
+        "cron",
+        hour=20,
+        minute=6,
+        args=[bot]
+    )
+    scheduler.start()
+
+
+async def startup(bot: Bot):
+    setup_scheduler(bot)
 
 
 async def main():
     # await setup_database()
     bot = Bot(token=BOT_TOKEN)
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, on_startup=startup)
 
 
 @dp.message(Command("start"))
