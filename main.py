@@ -1,7 +1,7 @@
 import re
 import asyncio
 import sqlalchemy
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, StateFilter
@@ -9,18 +9,22 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
 from data.database import new_session, setup_database
 from data.models import TaskModel, TagModel, UserModel
 
 form_router = Router()
+scheduler = AsyncIOScheduler()
 dp = Dispatcher()
 
 
 async def main():
     # await setup_database()
     bot = Bot(token=BOT_TOKEN)
+    await on_startup(bot)
     await dp.start_polling(bot)
 
 
@@ -64,6 +68,51 @@ class TaskStates(StatesGroup):
     change_tag = State()
     type_to_edit = State()
     type_to = State()
+
+
+def setup_scheduler(bot: Bot):
+    scheduler.add_job(
+        send_reminders,
+        trigger="cron",
+        hour=9,
+        minute=00,
+        args=[bot]
+    )
+    scheduler.start()
+
+
+async def on_startup(bot: Bot):
+    setup_scheduler(bot)
+
+
+async def send_reminders(bot: Bot):
+    async with new_session() as session:
+        # Получаем задачи, у которых дедлайн через 1 день
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        task_query = (
+            sqlalchemy.select(TaskModel).where(
+                TaskModel.due_date == tomorrow,
+                TaskModel.is_done == 0
+            )
+        )
+        task_result = await session.execute(task_query)
+        tasks = task_result.scalars().all()
+
+        for task in tasks:
+            try:
+                tag_query = sqlalchemy.select(TagModel).where(
+                    TagModel.id == task.tag_id
+                )
+                tag_result = await session.execute(tag_query)
+                tag = tag_result.scalars().first()
+                await bot.send_message(
+                    chat_id=task.user_id,
+                    text=f"ЗАВТРА ({task.due_date.strftime('%d-%m-%Y')})\n"
+                         f"ДЕДЛАЙН ЗАДАЧИ '{task.title}' с тегом #{tag.title}\n"
+                         f"Перейдите в /edit_task если хотите перенести дедлайн!"
+                )
+            except Exception as error:
+                print(error)
 
 
 @dp.message(Command("add_task"))
