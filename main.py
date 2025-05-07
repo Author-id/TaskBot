@@ -1,7 +1,6 @@
 import re
 import asyncio
 import sqlalchemy
-from sqlalchemy.orm import selectinload
 from datetime import datetime, date, timedelta
 
 from aiogram import Bot, Dispatcher, Router, F
@@ -22,51 +21,11 @@ scheduler = AsyncIOScheduler()
 dp = Dispatcher()
 
 
-async def send_reminders(bot: Bot):
-    async with new_session() as session:
-        # Получаем задачи, у которых дедлайн через 1 день
-        tomorrow = datetime.now().date() + timedelta(days=1)
-        query = (
-            sqlalchemy.select(TaskModel).where(
-                TaskModel.due_date == tomorrow,
-                TaskModel.is_done == False
-            )
-        )
-        result = await session.execute(query)
-        tasks = result.scalars().all()
-        print(tasks)
-
-        for task in tasks:
-            try:
-                await bot.send_message(
-                    chat_id=task.user_id,
-                    text=f"Завтра ({task.due_date.strftime('%d-%m-%Y')}) ДЕДЛАЙН задачи '{task.title}'!\n"
-                         f"Тег: #{task.tag}\n"
-                         f"Перейдите в /edit_task если хотите перенести дедлайн!"
-                )
-            except Exception as error:
-                print(error)
-
-
-def setup_scheduler(bot: Bot):
-    scheduler.add_job(
-        send_reminders,
-        "cron",
-        hour=20,
-        minute=6,
-        args=[bot]
-    )
-    scheduler.start()
-
-
-async def startup(bot: Bot):
-    setup_scheduler(bot)
-
-
 async def main():
     # await setup_database()
     bot = Bot(token=BOT_TOKEN)
-    await dp.start_polling(bot, on_startup=startup)
+    await on_startup(bot)
+    await dp.start_polling(bot)
 
 
 @dp.message(Command("start"))
@@ -109,6 +68,51 @@ class TaskStates(StatesGroup):
     change_tag = State()
     type_to_edit = State()
     type_to = State()
+
+
+def setup_scheduler(bot: Bot):
+    scheduler.add_job(
+        send_reminders,
+        trigger="cron",
+        hour=9,
+        minute=00,
+        args=[bot]
+    )
+    scheduler.start()
+
+
+async def on_startup(bot: Bot):
+    setup_scheduler(bot)
+
+
+async def send_reminders(bot: Bot):
+    async with new_session() as session:
+        # Получаем задачи, у которых дедлайн через 1 день
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        task_query = (
+            sqlalchemy.select(TaskModel).where(
+                TaskModel.due_date == tomorrow,
+                TaskModel.is_done == 0
+            )
+        )
+        task_result = await session.execute(task_query)
+        tasks = task_result.scalars().all()
+
+        for task in tasks:
+            try:
+                tag_query = sqlalchemy.select(TagModel).where(
+                    TagModel.id == task.tag_id
+                )
+                tag_result = await session.execute(tag_query)
+                tag = tag_result.scalars().first()
+                await bot.send_message(
+                    chat_id=task.user_id,
+                    text=f"ЗАВТРА ({task.due_date.strftime('%d-%m-%Y')})\n"
+                         f"ДЕДЛАЙН ЗАДАЧИ '{task.title}' с тегом #{tag.title}\n"
+                         f"Перейдите в /edit_task если хотите перенести дедлайн!"
+                )
+            except Exception as error:
+                print(error)
 
 
 @dp.message(Command("add_task"))
