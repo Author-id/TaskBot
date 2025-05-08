@@ -196,7 +196,7 @@ async def get_tags(message):
     async with new_session() as session:
         query = sqlalchemy.select(TagModel).where(
             TagModel.user_id == message.from_user.id
-            )
+        )
         result = await session.execute(query)
         return [(tag.id, tag.title) for tag in result.scalars().all()]
 
@@ -232,18 +232,18 @@ async def process_task_add_tag(message: Message, state: FSMContext):
 
 @dp.message(Command("delete_tag"))
 async def delete_tag(message: Message, state: FSMContext):
-        user_tags = await get_tags(message)
-        if not user_tags:
-            await message.answer("У вас нет активных тегов!")
-            return
+    user_tags = await get_tags(message)
+    if not user_tags:
+        await message.answer("У вас нет активных тегов!")
+        return
 
-        tags_list = "\n".join([f"{tag_id}. {tag_title}" for tag_id, tag_title in user_tags])
-        await message.answer(
-            "Введите ID тега:\n"
-            f"{tags_list}\n\n",
-        )
-        await state.update_data(user_tags=user_tags)
-        await state.set_state(TaskStates.delete_tag)
+    tags_list = "\n".join([f"{tag_id}. {tag_title}" for tag_id, tag_title in user_tags])
+    await message.answer(
+        "Введите ID тега:\n"
+        f"{tags_list}\n\n",
+    )
+    await state.update_data(user_tags=user_tags)
+    await state.set_state(TaskStates.delete_tag)
 
 
 @dp.message(TaskStates.delete_tag)

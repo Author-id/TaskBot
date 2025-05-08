@@ -4,7 +4,7 @@ from datetime import datetime
 from data.database import Base
 
 
-class UserModel(Base): # модель пользователя
+class UserModel(Base):  # модель пользователя
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -15,14 +15,14 @@ class UserModel(Base): # модель пользователя
         "TaskModel",
         back_populates="user",
         cascade="all, delete-orphan"
-    ) # связь один ко многим
+    )  # связь один ко многим
 
 
-class TaskModel(Base): # модель задачи
+class TaskModel(Base):  # модель задачи
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.tg_id"), nullable=False) # ссылка на пользователя
+    user_id = Column(Integer, ForeignKey("users.tg_id"), nullable=False)  # ссылка на пользователя
     title = Column(String(50), nullable=False)
     tag_id = Column(Integer, ForeignKey("tags.id"), nullable=True)
     due_date = Column(Date, nullable=True)
@@ -32,14 +32,14 @@ class TaskModel(Base): # модель задачи
     tag = relationship(
         "TagModel",
         back_populates="tasks"
-    ) # связь многие к одному
+    )  # связь многие к одному
     user = relationship(
         "UserModel",
         back_populates="tasks"
-    ) # связь многие к одному
+    )  # связь многие к одному
 
 
-class TagModel(Base): # модель тега
+class TagModel(Base):  # модель тега
     __tablename__ = "tags"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -49,4 +49,4 @@ class TagModel(Base): # модель тега
     tasks = relationship(
         "TaskModel",
         back_populates="tag"
-    ) # связь один ко многим
+    )  # связь один ко многим
