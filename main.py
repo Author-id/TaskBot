@@ -61,7 +61,6 @@ class TaskStates(StatesGroup):
     add_tag = State()
     delete_tag = State()
     set_remind = State()
-    get_notify_date = State()
     delete_number = State()
     edit_task = State()
     change_title = State()
