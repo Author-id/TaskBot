@@ -61,6 +61,7 @@ class TaskStates(StatesGroup):
     add_tag = State()
     delete_tag = State()
     set_remind = State()
+    get_notify_date = State()
     delete_number = State()
     edit_task = State()
     change_title = State()
@@ -589,28 +590,33 @@ async def tag_update(message: Message, state: FSMContext):
     F.data == "set_remind",
     StateFilter(TaskStates.edit_task),
 )
-async def notification_time(message: Message, state: FSMContext):
-    await message.answer(
-        "Укажите дату и время для получения уведомления в формате:"
-        "\nДД-ММ-ГГГГ ЧЧ:MM"
-    )
-    await state.set_state(TaskStates.set_remind)
+async def notification_time(callback: CallbackQuery, state: FSMContext):
+    await change_smth(callback, state,
+                      "Введите дату и время для получения уведомления в формате (ДД-ММ-ГГГГ ЧЧ:ММ)",
+        TaskStates.set_remind)
 
 
 @dp.message(TaskStates.set_remind)
 async def set_remind(message: Message, state: FSMContext):
     try:
         notify_time = datetime.strptime(message.text, "%d-%m-%Y %H:%M")
-
         if notify_time <= datetime.now():
-            await message.answer("Время в прошлом!")
+            await message.answer("Дата в прошлом!")
             return
 
-        await state.update_data(notify_time=notify_time)
+        task, session, answer = await get_state(state)
+        task.notify_time = notify_time
+        task.send_remind = False
+        session.add(task)
+        await session.commit()
+        formatted_time = notify_time.strftime("%d.%m.%Y в %H:%M")
+        await message.answer(f"Напоминание о дедлайне задачи {answer} установлено на {formatted_time}!!!")
+        await state.clear()
+        return
 
-    except:
-        pass
-
+    except ValueError:
+        await message.answer("Неверный формат даты! Используйте ДД-ММ-ГГГГ ЧЧ:ММ")
+        return
 
 
 async def change_status(callback, state, arg, text):
