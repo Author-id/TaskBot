@@ -27,7 +27,8 @@ class TaskModel(Base):  # модель задачи
     tag_id = Column(Integer, ForeignKey("tags.id"), nullable=True)
     due_date = Column(Date, nullable=True)
     is_done = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    notify_time = Column(DateTime, nullable=False)
+    send_remind = Column(Boolean, default=False)
 
     tag = relationship(
         "TagModel",
