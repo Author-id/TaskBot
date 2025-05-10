@@ -1,7 +1,7 @@
 import re
 import asyncio
 import sqlalchemy
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, StateFilter
@@ -17,7 +17,6 @@ from data.database import new_session, setup_database
 from data.models import TaskModel, TagModel, UserModel
 
 form_router = Router()
-scheduler = AsyncIOScheduler()
 dp = Dispatcher()
 
 
@@ -61,6 +60,7 @@ class TaskStates(StatesGroup):
     due_date = State()
     add_tag = State()
     delete_tag = State()
+    set_remind = State()
     delete_number = State()
     edit_task = State()
     change_title = State()
@@ -71,11 +71,11 @@ class TaskStates(StatesGroup):
 
 
 def setup_scheduler(bot: Bot):
+    scheduler = AsyncIOScheduler()
     scheduler.add_job(
         send_reminders,
-        trigger="cron",
-        hour=9,
-        minute=00,
+        "interval",
+        minutes=1,
         args=[bot]
     )
     scheduler.start()
@@ -87,16 +87,17 @@ async def on_startup(bot: Bot):
 
 async def send_reminders(bot: Bot):
     async with new_session() as session:
-        # Получаем задачи, у которых дедлайн через 1 день
-        tomorrow = datetime.now().date() + timedelta(days=1)
+        now = datetime.now()
+        start_time = now - timedelta(minutes=1)
+        end_time = now + timedelta(minutes=1)
         task_query = (
             sqlalchemy.select(TaskModel).where(
-                TaskModel.due_date == tomorrow,
-                TaskModel.is_done == 0
+                TaskModel.notify_time.between(start_time, end_time),
+                TaskModel.is_done == 0,
+                TaskModel.send_remind == 0
             )
         )
-        task_result = await session.execute(task_query)
-        tasks = task_result.scalars().all()
+        tasks = (await session.execute(task_query)).scalars().all()
 
         for task in tasks:
             try:
@@ -105,12 +106,22 @@ async def send_reminders(bot: Bot):
                 )
                 tag_result = await session.execute(tag_query)
                 tag = tag_result.scalars().first()
-                await bot.send_message(
-                    chat_id=task.user_id,
-                    text=f"ЗАВТРА ({task.due_date.strftime('%d-%m-%Y')})\n"
-                         f"ДЕДЛАЙН ЗАДАЧИ '{task.title}' с тегом #{tag.title}\n"
-                         f"Перейдите в /edit_task если хотите перенести дедлайн!"
-                )
+                if tag:
+                    await bot.send_message(
+                        chat_id=task.user_id,
+                        text=f"ЗАВТРА ({task.due_date.strftime('%d-%m-%Y')})\n"
+                             f"ДЕДЛАЙН ЗАДАЧИ '{task.title}' с тегом #{tag.title}\n"
+                             f"Перейдите в /edit_task если хотите перенести дедлайн!"
+                    )
+                else:
+                    await bot.send_message(
+                        chat_id=task.user_id,
+                        text=f"ЗАВТРА ({task.due_date.strftime('%d-%m-%Y')})\n"
+                             f"ДЕДЛАЙН ЗАДАЧИ '{task.title}'\n"
+                             f"Перейдите в /edit_task если хотите перенести дедлайн!"
+                    )
+                task.send_remind = True
+                await session.commit()
             except Exception as error:
                 print(error)
 
@@ -150,7 +161,14 @@ async def date_validation(input_date, message):
 
 @dp.message(TaskStates.due_date)
 async def process_due_date(message: Message, state: FSMContext):
+    now = datetime.now()
     due_date = await date_validation(message.text, message)
+    if now.time().hour >= 18 and due_date == now.date() + timedelta(days=1):
+        notify_hour = now.time().hour + 2
+    else:
+        notify_hour = 18
+    notify_date = due_date - timedelta(days=1)
+    notify_time = datetime.combine(notify_date, time(notify_hour, 00))
     if not due_date:
         return
 
@@ -169,6 +187,7 @@ async def process_due_date(message: Message, state: FSMContext):
                     title=data["title"],
                     tag_id=tag.id,
                     due_date=due_date,
+                    notify_time=notify_time
                 )
                 session.add(task)
                 await session.commit()
@@ -179,6 +198,7 @@ async def process_due_date(message: Message, state: FSMContext):
                     user_id=message.from_user.id,
                     title=data["title"],
                     due_date=due_date,
+                    notify_time=notify_time
                 )
                 session.add(task)
                 await session.commit()
@@ -437,9 +457,10 @@ async def choose_edit(message: Message, state: FSMContext):
                     ],
                     [
                         InlineKeyboardButton(text="Тег", callback_data="change_tag"),
-                        InlineKeyboardButton(text="Завершить", callback_data="is_done"),
+                        InlineKeyboardButton(text="Напомнить", callback_data="set_remind"),
                     ],
                     [
+                        InlineKeyboardButton(text="Завершить", callback_data="is_done"),
                         InlineKeyboardButton(text="Удалить", callback_data="delete"),
                     ],
                 ])
@@ -562,6 +583,34 @@ async def tag_update(message: Message, state: FSMContext):
         await message.answer(f'К задаче {answer} добавлен тег #{title}')
     await state.clear()
     return
+
+
+@dp.callback_query(
+    F.data == "set_remind",
+    StateFilter(TaskStates.edit_task),
+)
+async def notification_time(message: Message, state: FSMContext):
+    await message.answer(
+        "Укажите дату и время для получения уведомления в формате:"
+        "\nДД-ММ-ГГГГ ЧЧ:MM"
+    )
+    await state.set_state(TaskStates.set_remind)
+
+
+@dp.message(TaskStates.set_remind)
+async def set_remind(message: Message, state: FSMContext):
+    try:
+        notify_time = datetime.strptime(message.text, "%d-%m-%Y %H:%M")
+
+        if notify_time <= datetime.now():
+            await message.answer("Время в прошлом!")
+            return
+
+        await state.update_data(notify_time=notify_time)
+
+    except:
+        pass
+
 
 
 async def change_status(callback, state, arg, text):
