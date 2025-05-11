@@ -68,6 +68,8 @@ class TaskStates(StatesGroup):
     change_tag = State()
     type_to_edit = State()
     type_to = State()
+    filter = State()
+    filter_edit = State()
 
 
 def setup_scheduler(bot: Bot):
@@ -341,15 +343,18 @@ async def get_task(data, message, nums):
             return
 
 
-async def task_buttons(message, text1, text2, text3):
+async def task_buttons(message, text1, text2, text3, text4):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Активные", callback_data=text1),
             InlineKeyboardButton(text="Завершенные", callback_data=text2),
         ],
+        [
+            InlineKeyboardButton(text="Отфильтровать по тегу", callback_data=text3),
+        ]
     ])
 
-    await message.answer(text3, reply_markup=keyboard)
+    await message.answer(text4, reply_markup=keyboard)
 
 
 async def choose_status(callback, state, arg, text1, text2):
@@ -370,7 +375,6 @@ async def choose_status(callback, state, arg, text1, text2):
             for el in nums:
                 answer[count] = el
                 count += 1
-            print(answer)
             await state.set_state(TaskStates.edit_task)
             await state.update_data(nums=answer)
     else:
@@ -379,7 +383,7 @@ async def choose_status(callback, state, arg, text1, text2):
 
 @dp.message(Command("tasks"))
 async def tasks_buttons(message: Message, state: FSMContext):
-    await task_buttons(message, "active", "done", "Выберите тип задач: ")
+    await task_buttons(message, "active", "done", "filter", "Выберите тип задач: ")
     await state.set_state(TaskStates.type_to)
 
 
@@ -399,9 +403,103 @@ async def choose_done(callback: CallbackQuery, state: FSMContext):
     await choose_status(callback, state, True, "Завершенные задачи:\n", "Завершенных задач нет")
 
 
+@dp.callback_query(
+    F.data == "filter",
+)
+async def view_filter(callback: CallbackQuery, state: FSMContext):
+    await choose_filter(callback, state, False)
+
+
+async def choose_filter(callback: CallbackQuery, state: FSMContext, arg):
+    tags = dict()
+    async with new_session() as session:
+        query = await session.execute(
+            sqlalchemy.select(TagModel).where(
+                UserModel.tg_id == TagModel.user_id
+            )
+        )
+        query = query.scalars().all()
+        for el in query:
+            tags[el.id] = el.title
+
+    keyboard = list()
+    current_row = list()
+
+    for tag_id, tag_title in tags.items():
+        current_row.append(
+            InlineKeyboardButton(text=tag_title, callback_data=f"tag_{tag_id}")
+        )
+
+        if len(current_row) == 3 or tag_id == list(tags.keys())[-1]:
+            keyboard.append(current_row)
+            current_row = list()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+    await callback.message.answer(
+        "Выберите тег для фильтра:",
+        reply_markup=keyboard
+    )
+    await state.set_state(TaskStates.filter)
+    await state.update_data(arg=arg)
+
+
+@dp.callback_query(
+    StateFilter(TaskStates.filter)
+)
+async def process_filter(callback: CallbackQuery, state: FSMContext):
+    args = await state.get_data()
+    arg = args.get("arg")
+    tag_id = int(callback.data.split("_")[1])
+    async with new_session() as session:
+        tag = await session.execute(sqlalchemy.select(TagModel).where(
+            TagModel.id == tag_id,
+        ))
+        tag = tag.scalars().first()
+        result = await session.execute(sqlalchemy.select(TaskModel).where(
+            TaskModel.user_id == callback.from_user.id,
+            TaskModel.tag_id == tag_id,
+            TaskModel.is_done == False,
+        ))
+        result = result.scalars().all()
+        if result:
+            data = dict()
+            for el in result:
+                if el.due_date in data:
+                    data[
+                        el.due_date].append(
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n")
+                else:
+                    data[
+                        el.due_date] = [
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n"]
+            data = sorted(data.items())
+            ans = list()
+            for el in data:
+                for i in el[1]:
+                    ans.append(i)
+            count = 1
+            data = ans
+            nums = dict()
+            ans = list()
+            for i in data:
+                nums[count] = int(re.search(r"(\d+)[^\n]*", i).group(1))
+                i = i.replace(re.search(r"(№\d+)[^\n]*", i).group(1).strip(), f"<b>№{count}</b> ", 1)
+                ans.append(i)
+                count += 1
+            await callback.message.answer(f"Активные задачи с тегом #{tag.title} : \n" + f"{''.join(ans)}", parse_mode="html")
+            if arg:
+                await state.set_state(TaskStates.edit_task)
+                await state.update_data(nums=nums)
+            else:
+                await state.clear()
+        else:
+            await callback.message.answer(f"Активных задач с тегом #{tag.title} нет")
+
+
 @dp.message(Command("edit_task"))
 async def edit_tasks_buttons(message: Message, state: FSMContext):
-    await task_buttons(message, "edit_active", "edit_done", "Выберите тип задачи:")
+    await task_buttons(message, "edit_active", "edit_done", "filter_edit", "Выберите тип задачи:")
     await state.set_state(TaskStates.type_to_edit)
 
 
@@ -420,6 +518,14 @@ async def edit_choose_active(callback: CallbackQuery, state: FSMContext):
 )
 async def edit_choose_done(callback: CallbackQuery, state: FSMContext):
     await choose_status(callback, state, True, "Выберите номер задачи:\n", "Завершенных задач нет")
+
+
+@dp.callback_query(
+    F.data == "filter_edit",
+    StateFilter(TaskStates.type_to_edit)
+)
+async def view_filter_edit(callback: CallbackQuery, state: FSMContext):
+    await choose_filter(callback, state, True)
 
 
 @dp.message(TaskStates.edit_task)
