@@ -1,19 +1,18 @@
-import re
 import asyncio
-import sqlalchemy
+import re
 from datetime import datetime, date, time, timedelta
 
+import sqlalchemy
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
-
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
-from data.database import new_session, setup_database
+from data.database import new_session
 from data.models import TaskModel, TagModel, UserModel
 
 form_router = Router()
@@ -405,6 +404,7 @@ async def choose_done(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(
     F.data == "filter",
+    StateFilter(TaskStates.type_to),
 )
 async def view_filter(callback: CallbackQuery, state: FSMContext):
     await choose_filter(callback, state, False)
@@ -435,13 +435,17 @@ async def choose_filter(callback: CallbackQuery, state: FSMContext, arg):
             current_row = list()
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-    await callback.message.answer(
-        "Выберите тег для фильтра:",
-        reply_markup=keyboard
-    )
-    await state.set_state(TaskStates.filter)
-    await state.update_data(arg=arg)
+    if tags:
+        await callback.message.answer(
+            "Выберите тег для фильтра:",
+            reply_markup=keyboard
+        )
+        await state.set_state(TaskStates.filter)
+        await state.update_data(arg=arg)
+    else:
+        await callback.message.answer(
+            "Тегов нет. Добавьте их через команду /add_tag",
+        )
 
 
 @dp.callback_query(
@@ -487,7 +491,8 @@ async def process_filter(callback: CallbackQuery, state: FSMContext):
                 i = i.replace(re.search(r"(№\d+)[^\n]*", i).group(1).strip(), f"<b>№{count}</b> ", 1)
                 ans.append(i)
                 count += 1
-            await callback.message.answer(f"Активные задачи с тегом #{tag.title} : \n" + f"{''.join(ans)}", parse_mode="html")
+            await callback.message.answer(f"Активные задачи с тегом #{tag.title} : \n" + f"{''.join(ans)}",
+                                          parse_mode="html")
             if arg:
                 await state.set_state(TaskStates.edit_task)
                 await state.update_data(nums=nums)
@@ -698,7 +703,7 @@ async def tag_update(message: Message, state: FSMContext):
 async def notification_time(callback: CallbackQuery, state: FSMContext):
     await change_smth(callback, state,
                       "Введите дату и время для получения уведомления в формате (ДД-ММ-ГГГГ ЧЧ:ММ)",
-        TaskStates.set_remind)
+                      TaskStates.set_remind)
 
 
 @dp.message(TaskStates.set_remind)
