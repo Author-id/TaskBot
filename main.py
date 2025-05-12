@@ -116,7 +116,7 @@ async def send_reminders(bot: Bot):
                 else:
                     await bot.send_message(
                         chat_id=task.user_id,
-                        text=f"ЗАВТРА ({task.due_date.strftime('%d-%m-%Y')})\n"
+                        text=f"{task.due_date.strftime('%d-%m-%Y')}\n"
                              f"ДЕДЛАЙН ЗАДАЧИ '{task.title}'\n"
                              f"Перейдите в /edit_task если хотите перенести дедлайн!"
                     )
