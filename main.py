@@ -12,7 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from data.bot_messages import MESSAGES
 from data.config import BOT_TOKEN
-from data.database import new_session
+from data.database import new_session, setup_database
 from data.models import TaskModel, TagModel, UserModel
 
 form_router = Router()
@@ -193,7 +193,7 @@ async def process_due_date(message: Message, state: FSMContext):
                 session.add(task)
                 await session.commit()
                 await message.answer(
-                    f"Задача успешно добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime('%d-%m-%Y')}\nТег: #{data['tag']}")
+                    f"Задача успешно добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime('%d-%m-%Y')}\nНапоминание установлено на {notify_time.strftime('%d-%m-%Y %H:%M')}\n")
             else:
                 task = TaskModel(
                     user_id=message.from_user.id,
@@ -204,7 +204,7 @@ async def process_due_date(message: Message, state: FSMContext):
                 session.add(task)
                 await session.commit()
                 await message.answer(
-                    f"Задача успешно добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime('%d-%m-%Y')}\n")
+                    f"Задача успешно добавлена!\nНазвание: {data['title']}\nДедлайн: {due_date.strftime('%d-%m-%Y')}\nНапоминание установлено на {notify_time.strftime('%d-%m-%Y %H:%M')}\n")
 
         except Exception as e:
             print(e)
@@ -304,19 +304,19 @@ async def get_tasks(status, message):
                 if tag:
                     data[
                         el.due_date].append(
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n")
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n" if el.is_done else f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nНапоминание: {el.notify_time.strftime('%d-%m-%Y %H:%M')}\nТег: #{tag.title}\n")
                 else:
                     data[el.due_date].append(
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\n")
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\n" if el.is_done else f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nНапоминание: {el.notify_time.strftime('%d-%m-%Y %H:%M')}\n")
             else:
                 if tag:
                     data[
                         el.due_date] = [
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n"]
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n" if el.is_done else f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nНапоминание: {el.notify_time.strftime('%d-%m-%Y %H:%M')}\nТег: #{tag.title}\n"]
                 else:
                     data[
                         el.due_date] = [
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\n"]
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\n" if el.is_done else f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nНапоминание: {el.notify_time.strftime('%d-%m-%Y %H:%M')}\n"]
         data = sorted(data.items())
         ans = list()
         for el in data:
@@ -472,11 +472,11 @@ async def process_filter(callback: CallbackQuery, state: FSMContext):
                 if el.due_date in data:
                     data[
                         el.due_date].append(
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n")
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nНапоминание: {el.notify_time.strftime('%d-%m-%Y %H:%M')}\nТег: #{tag.title}\n")
                 else:
                     data[
                         el.due_date] = [
-                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nТег: #{tag.title}\n"]
+                        f"\nЗадача №{el.id} \n{el.title}\nДедлайн: {el.due_date.strftime('%d-%m-%Y')}\nНапоминание: {el.notify_time.strftime('%d-%m-%Y %H:%M')}\nТег: #{tag.title}\n"]
             data = sorted(data.items())
             ans = list()
             for el in data:
